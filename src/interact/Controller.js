@@ -11,6 +11,12 @@ export class Controller {
     this.connecting = null; // { fromNode, fromPort, x(screen), y(screen) }
     this.panning = null; // { x(screen), y(screen) }
 
+    this._onKeyPressEvt = this._onKeyPress.bind(this);
+    this._onDownEvt = this._onDown.bind(this);
+    this._onWheelEvt = this._onWheel.bind(this);
+    this._onMoveEvt = this._onMove.bind(this);
+    this._onUpEvt = this._onUp.bind(this);
+
     this._cursor = "default";
 
     this._bindEvents();
@@ -18,15 +24,22 @@ export class Controller {
 
   _bindEvents() {
     const c = this.renderer.canvas;
-    c.addEventListener("mousedown", (e) => this._onDown(e));
-    window.addEventListener("mousemove", (e) => this._onMove(e));
-    window.addEventListener("mouseup", (e) => this._onUp(e));
-    // 더블클릭으로 노드 생성하지 않음 (요청 사항)
-    // c.addEventListener("dblclick", (e) => this._onDbl(e));
-    c.addEventListener("wheel", (e) => this._onWheel(e), { passive: false });
+    c.addEventListener("mousedown", this._onDownEvt);
+    c.addEventListener("wheel", this._onWheelEvt, { passive: false });
+    window.addEventListener("mousemove", this._onMoveEvt);
+    window.addEventListener("mouseup", this._onUpEvt);
+    window.addEventListener("keydown", this._onKeyPressEvt);
+  }
 
-    // 필요 시 우클릭 패닝을 원하면 이걸 켜세요.
-    // c.addEventListener("contextmenu", e => e.preventDefault());
+  _onKeyPress(e) {
+    // remove the selected nodes
+    if (e.key === "Delete") {
+      [...this.selection].forEach((node) => {
+        this.graph.removeNode(node);
+      });
+
+      this.render();
+    }
   }
 
   _setCursor(c) {
