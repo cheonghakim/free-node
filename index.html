@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Graph Editor Demo (with Runner)</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      #wrap {
+        height: 100%;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+      header {
+        padding: 8px;
+        background: #111;
+        color: #ddd;
+        font: 14px/1.4 system-ui;
+      }
+      .content-root {
+        width: 100%;
+        height: 100%;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      button {
+        margin-right: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <header>
+        <button id="add">Add Node</button>
+        <button id="save">Save</button>
+        <button id="load">Load</button>
+        <button id="start">Start</button>
+        <button id="stop">Stop</button>
+      </header>
+      <main class="content-root">
+        <canvas id="cv"></canvas>
+      </main>
+    </div>
+    <script type="module">
+      import { createGraphEditor } from "./src/index.js";
+      const cv = document.getElementById("cv");
+      const editor = createGraphEditor(cv, { autorun: false });
+
+      document.getElementById("add").onclick = () => {
+        editor.addNode("core/Note", {
+          x: 100 + Math.random() * 200,
+          y: 100 + Math.random() * 100,
+        });
+        editor.render();
+      };
+
+      document.getElementById("save").onclick = () => {
+        let saved = editor.toJSON();
+        console.log(saved);
+        const mime = "application/json";
+        const blob = new Blob([JSON.stringify(saved)], {
+          type: mime,
+        });
+
+        const url = changeFileToUrl(blob);
+        const fileName = "FreeNode";
+
+        // 다운로드 엘리먼트 추가
+        const downloadLink = document.createElement("a");
+        downloadLink.href = url;
+        downloadLink.download = `${fileName}.json`;
+
+        // 다운로드
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+
+        // 해제
+        document.body.removeChild(downloadLink);
+        revokeURL(url);
+      };
+      document.getElementById("load").onclick = () => {
+        const changeEvt = (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+
+            reader.onload = async (e) => {
+              try {
+                // JSON 파싱
+                editor.graph.clear();
+                const jsonData = editor.fromJSON(JSON.parse(e.target.result));
+
+                editor.graph.nodes = jsonData.nodes;
+                editor.graph.edges = jsonData.edges;
+
+                editor.render();
+
+                // 이벤트 해제
+                input.removeEventListener("change", changeEvt);
+              } catch (error) {
+                console.error(error);
+                alert("파일을 로드 하지 못했습니다.");
+              }
+            };
+
+            // 파일을 텍스트로 읽기
+            reader.readAsText(file);
+          }
+        };
+        const input = document.createElement("input");
+        input.accept = ".json";
+        input.type = "file";
+        input.multiple = false;
+        input.click();
+        input.addEventListener("change", changeEvt);
+      };
+      document.getElementById("start").onclick = () => editor.start();
+      document.getElementById("stop").onclick = () => editor.stop();
+
+      function revokeURL(objectUrl) {
+        try {
+          if (window.URL) {
+            window.URL.revokeObjectURL(objectUrl);
+          } else if (window.webkitURL) {
+            window.webkitURL.revokeObjectURL(objectUrl);
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      function changeFileToUrl(file) {
+        // 부차적인 방법
+        if (window.URL) {
+          return window.URL.createObjectURL(file);
+        } else if (window.webkitURL) {
+          return window.webkitURL.createObjectURL(file);
+        } else {
+          return null;
+        }
+      }
+    </script>
+  </body>
+</html>
