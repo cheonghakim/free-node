@@ -76,6 +76,14 @@ class Graph {
     this._valuesB = /* @__PURE__ */ new Map();
     this._useAasCurrent = true;
   }
+  getNodeById(id) {
+    for (let [_id, node] of this.nodes.entries()) {
+      if (id === _id) {
+        return node;
+      }
+    }
+    return null;
+  }
   addNode(type, opts = {}) {
     var _a, _b, _c, _d;
     const def = this.registry.types.get(type);
@@ -286,6 +294,27 @@ class CanvasRenderer {
   _resetTransform() {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
+  _drawScreenText(text, lx, ly, {
+    fontPx = 12,
+    color = this.theme.text,
+    align = "left",
+    baseline = "alphabetic",
+    dpr = 1
+    // 추후 devicePixelRatio 도입
+  } = {}) {
+    const { ctx } = this;
+    const { x: sx, y: sy } = this.worldToScreen(lx, ly);
+    ctx.save();
+    this._resetTransform();
+    const px = Math.round(sx) + 0.5;
+    const py = Math.round(sy) + 0.5;
+    ctx.font = `${fontPx * this.scale}px system-ui`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, px, py);
+    ctx.restore();
+  }
   drawGrid() {
     const { ctx, canvas, theme, scale, offsetX, offsetY } = this;
     this._resetTransform();
@@ -314,15 +343,29 @@ class CanvasRenderer {
     ctx.stroke();
     this._resetTransform();
   }
-  draw(graph, { selection = /* @__PURE__ */ new Set(), tempEdge = null } = {}) {
+  draw(graph, {
+    selection = /* @__PURE__ */ new Set(),
+    tempEdge = null,
+    running = false,
+    time = performance.now(),
+    dt = 0
+  } = {}) {
     var _a, _b;
     this.drawGrid();
-    console.log(tempEdge);
     const { ctx, theme } = this;
     this._applyTransform();
     ctx.save();
+    if (running) {
+      const speed = 120;
+      const phase = time / 1e3 * speed / this.scale % 12;
+      ctx.setLineDash([6 / this.scale, 6 / this.scale]);
+      ctx.lineDashOffset = -phase;
+    } else {
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
     ctx.strokeStyle = theme.edge;
-    ctx.lineWidth = 2 / this.scale;
+    ctx.lineWidth = 2 * this.scale;
     for (const e of graph.edges.values()) this._drawEdge(graph, e);
     if (tempEdge) {
       const a = this.screenToWorld(tempEdge.x1, tempEdge.y1);
@@ -354,13 +397,13 @@ class CanvasRenderer {
         this._drawArrowhead(p1.x, p1.y, p2.x, p2.y, 12);
       }
     }
+    ctx.restore();
     for (const n of graph.nodes.values()) {
       const sel = selection.has(n.id);
       this._drawNode(n, sel);
       const def = (_b = (_a = this.registry) == null ? void 0 : _a.types) == null ? void 0 : _b.get(n.type);
       if (def == null ? void 0 : def.onDraw) def.onDraw(n, { ctx, theme });
     }
-    ctx.restore();
     this._resetTransform();
   }
   _drawNode(node, selected) {
@@ -377,9 +420,12 @@ class CanvasRenderer {
     ctx.fillStyle = theme.title;
     roundRect(ctx, x, y, w, 24, { tl: r, tr: r, br: 0, bl: 0 });
     ctx.fill();
-    ctx.fillStyle = theme.text;
-    ctx.font = `${12 / this.scale}px system-ui`;
-    ctx.fillText(node.title, x + 8, y + 16 / 1);
+    this._drawScreenText(node.title, x + 8, y + 12, {
+      fontPx: 12,
+      color: theme.text,
+      baseline: "middle",
+      align: "left"
+    });
     ctx.fillStyle = theme.port;
     node.inputs.forEach((p, i) => {
       const rct = portRect(node, p, i, "in");
@@ -465,11 +511,105 @@ function roundRect(ctx, x, y, w, h, r = 6) {
   ctx.quadraticCurveTo(x, y, x + r.tl, y);
   ctx.closePath();
 }
+function findEdgeId(graph, a, b, c, d) {
+  for (const [id, e] of graph.edges) {
+    if (e.fromNode === a && e.fromPort === b && e.toNode === c && e.toPort === d)
+      return id;
+  }
+  return null;
+}
+function MoveNodeCmd(node, fromPos, toPos) {
+  return {
+    do() {
+      node.pos = { ...toPos };
+    },
+    undo() {
+      node.pos = { ...fromPos };
+    }
+  };
+}
+function AddEdgeCmd(graph, fromNode, fromPort, toNode, toPort) {
+  let addedId = null;
+  return {
+    do() {
+      graph.addEdge(fromNode, fromPort, toNode, toPort);
+      addedId = findEdgeId(graph, fromNode, fromPort, toNode, toPort);
+    },
+    undo() {
+      const id = addedId ?? findEdgeId(graph, fromNode, fromPort, toNode, toPort);
+      if (id != null) graph.edges.delete(id);
+    }
+  };
+}
+function RemoveEdgeCmd(graph, edgeId) {
+  const e = graph.edges.get(edgeId);
+  if (!e) return null;
+  const { fromNode, fromPort, toNode, toPort } = e;
+  return {
+    do() {
+      graph.edges.delete(edgeId);
+    },
+    undo() {
+      graph.addEdge(fromNode, fromPort, toNode, toPort);
+    }
+  };
+}
+function RemoveNodeCmd(graph, node) {
+  let removedNode = null;
+  let removedEdges = [];
+  return {
+    do() {
+      removedNode = node;
+      removedEdges = graph.edges ? [...graph.edges.values()].filter((e) => {
+        console.log(e);
+        return e.fromNode === node.id || e.toNode === node.id;
+      }) : [];
+      for (const edge of removedEdges) {
+        graph.edges.delete(edge.id);
+      }
+      graph.nodes.delete(node.id);
+    },
+    undo() {
+      if (removedNode) {
+        graph.nodes.set(removedNode.id, removedNode);
+      }
+      for (const edge of removedEdges) {
+        graph.edges.set(edge.id, edge);
+      }
+    }
+  };
+}
+class CommandStack {
+  constructor() {
+    this.undoStack = [];
+    this.redoStack = [];
+  }
+  exec(cmd) {
+    cmd.do();
+    this.undoStack.push(cmd);
+    this.redoStack.length = 0;
+  }
+  undo() {
+    const c = this.undoStack.pop();
+    if (c) {
+      c.undo();
+      this.redoStack.push(c);
+    }
+  }
+  redo() {
+    const c = this.redoStack.pop();
+    if (c) {
+      c.do();
+      this.undoStack.push(c);
+    }
+  }
+}
 class Controller {
   constructor({ graph, renderer, hooks }) {
     this.graph = graph;
     this.renderer = renderer;
     this.hooks = hooks;
+    this.stack = new CommandStack();
     this.selection = /* @__PURE__ */ new Set();
     this.dragging = null;
     this.connecting = null;
@@ -491,8 +631,23 @@ class Controller {
     window.addEventListener("keydown", this._onKeyPressEvt);
   }
   _onKeyPress(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) this.stack.redo();
+      else this.stack.undo();
+      this.render();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      this.stack.redo();
+      this.render();
+      return;
+    }
     if (e.key === "Delete") {
       [...this.selection].forEach((node) => {
+        const nodeObj = this.graph.getNodeById(node);
+        this.stack.exec(RemoveNodeCmd(this.graph, nodeObj));
         this.graph.removeNode(node);
       });
       this.render();
@@ -573,21 +728,19 @@ class Controller {
       const incoming = this._findIncomingEdge(port.node.id, port.port.id);
       if (incoming) {
         const { edge, id } = incoming;
-        this.graph.edges.delete(id);
-        const outR = portRect(
-          this.graph.nodes.get(edge.fromNode),
-          this.graph.nodes.get(edge.fromNode).outputs.find((p) => p.id === edge.fromPort),
-          this.graph.nodes.get(edge.fromNode).outputs.findIndex((p) => p.id === edge.fromPort),
-          "out"
-        );
+        const rm = RemoveEdgeCmd(this.graph, id);
+        if (rm) this.stack.exec(rm);
+        const outNode = this.graph.nodes.get(edge.fromNode);
+        const iOut = outNode.outputs.findIndex((p) => p.id === edge.fromPort);
+        const outR = portRect(outNode, outNode.outputs[iOut], iOut, "out");
         const screenFrom = this.renderer.worldToScreen(outR.x, outR.y + 7);
         this.connecting = {
           fromNode: edge.fromNode,
           fromPort: edge.fromPort,
           x: screenFrom.x,
           y: screenFrom.y,
-          // 표시용: 끊어낸 대상 인풋
-          _rewireFromEdgeId: id
+          _removedEdge: { id, edge }
+          // 참고용 메모 (이미 제거됨)
         };
         this.render();
         return;
@@ -600,7 +753,9 @@ class Controller {
       this.dragging = {
         nodeId: node.id,
         dx: w.x - node.pos.x,
-        dy: w.y - node.pos.y
+        dy: w.y - node.pos.y,
+        startPos: { x: node.pos.x, y: node.pos.y }
+        // 원위치 저장
       };
       this.render();
       return;
@@ -655,15 +810,27 @@ class Controller {
       const from = this.connecting;
       const portIn = this._findPortAtWorld(w.x, w.y);
       if (portIn && portIn.dir === "in") {
-        this.graph.addEdge(
-          from.fromNode,
-          from.fromPort,
-          portIn.node.id,
-          portIn.port.id
+        this.stack.exec(
+          AddEdgeCmd(
+            this.graph,
+            from.fromNode,
+            from.fromPort,
+            portIn.node.id,
+            portIn.port.id
+          )
         );
       }
       this.connecting = null;
       this.render();
+    }
+    if (this.dragging) {
+      const n = this.graph.nodes.get(this.dragging.nodeId);
+      const start = this.dragging.startPos;
+      const end = { x: n.pos.x, y: n.pos.y };
+      if (start.x !== end.x || start.y !== end.y) {
+        this.stack.exec(MoveNodeCmd(n, start, end));
+      }
+      this.dragging = null;
     }
     this.dragging = null;
   }
@@ -702,8 +869,16 @@ class Runner {
     this._last = 0;
     this.cyclesPerFrame = Math.max(1, cyclesPerFrame | 0);
   }
+  // 외부에서 실행 중인지 확인
+  isRunning() {
+    return this.running;
+  }
+  // 실행 도중에도 CPS 변경 가능
+  setCyclesPerFrame(n) {
+    this.cyclesPerFrame = Math.max(1, n | 0);
+  }
   step(cycles = 1, dt = 0) {
-    var _a;
+    var _a, _b;
     const nCycles = Math.max(1, cycles | 0);
     for (let c = 0; c < nCycles; c++) {
       for (const node of this.graph.nodes.values()) {
@@ -723,7 +898,7 @@ class Runner {
               }
             });
           } catch (err) {
-            (_a = this.hooks) == null ? void 0 : _a.emit("error", err);
+            (_b = (_a = this.hooks) == null ? void 0 : _a.emit) == null ? void 0 : _b.call(_a, "error", err);
           }
         }
       }
@@ -731,22 +906,36 @@ class Runner {
     }
   }
   start() {
+    var _a, _b;
     if (this.running) return;
     this.running = true;
-    const step = (t) => {
+    this._last = 0;
+    (_b = (_a = this.hooks) == null ? void 0 : _a.emit) == null ? void 0 : _b.call(_a, "runner:start");
+    const loop = (t) => {
+      var _a2, _b2;
       if (!this.running) return;
-      const dt = this._last ? (t - this._last) / 1e3 : 0;
+      const dtMs = this._last ? t - this._last : 0;
       this._last = t;
+      const dt = dtMs / 1e3;
       this.step(this.cyclesPerFrame, dt);
-      this._raf = requestAnimationFrame(step);
+      (_b2 = (_a2 = this.hooks) == null ? void 0 : _a2.emit) == null ? void 0 : _b2.call(_a2, "runner:tick", {
+        time: t,
+        dt,
+        running: true,
+        cps: this.cyclesPerFrame
+      });
+      this._raf = requestAnimationFrame(loop);
     };
-    this._raf = requestAnimationFrame(step);
+    this._raf = requestAnimationFrame(loop);
   }
   stop() {
+    var _a, _b;
+    if (!this.running) return;
     this.running = false;
     if (this._raf) cancelAnimationFrame(this._raf);
     this._raf = null;
     this._last = 0;
+    (_b = (_a = this.hooks) == null ? void 0 : _a.emit) == null ? void 0 : _b.call(_a, "runner:stop");
   }
 }
 function createGraphEditor(canvas, { theme, hooks: customHooks, autorun = true } = {}) {
@@ -756,13 +945,44 @@ function createGraphEditor(canvas, { theme, hooks: customHooks, autorun = true }
     "edge:create",
     "edge:delete",
     "graph:serialize",
-    "error"
+    "error",
+    "runner:tick",
+    "runner:start",
+    "runner:stop"
   ]);
   const registry = new Registry();
   const graph = new Graph({ hooks, registry });
   const renderer = new CanvasRenderer(canvas, { theme, registry });
   const controller = new Controller({ graph, renderer, hooks });
   const runner = new Runner({ graph, registry, hooks });
+  hooks.on("runner:tick", ({ time, dt }) => {
+    renderer.draw(graph, {
+      selection: controller.selection,
+      tempEdge: controller.connecting ? controller.renderTempEdge() : null,
+      // 필요시 helper
+      running: true,
+      time,
+      dt
+    });
+  });
+  hooks.on("runner:start", () => {
+    renderer.draw(graph, {
+      selection: controller.selection,
+      tempEdge: controller.connecting ? controller.renderTempEdge() : null,
+      running: true,
+      time: performance.now(),
+      dt: 0
+    });
+  });
+  hooks.on("runner:stop", () => {
+    renderer.draw(graph, {
+      selection: controller.selection,
+      tempEdge: controller.connecting ? controller.renderTempEdge() : null,
+      running: false,
+      time: performance.now(),
+      dt: 0
+    });
+  });
   registry.register("core/Note", {
     title: "Note",
     size: { w: 180, h: 80 },
@@ -780,12 +1000,8 @@ function createGraphEditor(canvas, { theme, hooks: customHooks, autorun = true }
       );
     },
     onDraw(node, { ctx, theme: theme2 }) {
-      const pr = 8;
       const { x, y } = node.pos;
       const { width: w } = node.size;
-      ctx.fillStyle = theme2.text;
-      ctx.font = "11px system-ui";
-      ctx.fillText(node.state.text ?? "hello", x + pr, y + 40);
     }
   });
   renderer.resize(canvas.clientWidth, canvas.clientHeight);

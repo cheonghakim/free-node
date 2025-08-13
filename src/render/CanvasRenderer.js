@@ -109,6 +109,37 @@ export class CanvasRenderer {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
+  _drawScreenText(
+    text,
+    lx,
+    ly,
+    {
+      fontPx = 12,
+      color = this.theme.text,
+      align = "left",
+      baseline = "alphabetic",
+      dpr = 1, // 추후 devicePixelRatio 도입
+    } = {}
+  ) {
+    const { ctx } = this;
+    const { x: sx, y: sy } = this.worldToScreen(lx, ly);
+
+    ctx.save();
+    // 화면 좌표계(스케일=1)로 리셋
+    this._resetTransform();
+
+    // 픽셀 스냅(번짐 방지)
+    const px = Math.round(sx) + 0.5;
+    const py = Math.round(sy) + 0.5;
+
+    ctx.font = `${fontPx * this.scale}px system-ui`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, px, py);
+    ctx.restore();
+  }
+
   drawGrid() {
     const { ctx, canvas, theme, scale, offsetX, offsetY } = this;
     // clear screen in screen space
@@ -175,7 +206,7 @@ export class CanvasRenderer {
 
     // edges
     ctx.strokeStyle = theme.edge;
-    ctx.lineWidth = 2 / this.scale;
+    ctx.lineWidth = 2 * this.scale;
     for (const e of graph.edges.values()) this._drawEdge(graph, e);
 
     // temp edge (given in screen coords); convert to world if needed
@@ -243,9 +274,13 @@ export class CanvasRenderer {
     ctx.fillStyle = theme.title;
     roundRect(ctx, x, y, w, 24, { tl: r, tr: r, br: 0, bl: 0 });
     ctx.fill();
-    ctx.fillStyle = theme.text;
-    ctx.font = `${12 / this.scale}px system-ui`;
-    ctx.fillText(node.title, x + 8, y + 16 / 1);
+
+    this._drawScreenText(node.title, x + 8, y + 12, {
+      fontPx: 12,
+      color: theme.text,
+      baseline: "middle",
+      align: "left",
+    });
     ctx.fillStyle = theme.port;
     node.inputs.forEach((p, i) => {
       const rct = portRect(node, p, i, "in");

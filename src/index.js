@@ -80,19 +80,14 @@ export function createGraphEditor(
       const pr = 8;
       const { x, y } = node.pos;
       const { width: w } = node.size;
-
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const screenPos = renderer.worldToScreen(x + pr, y + 20);
-      ctx.fillStyle = theme.text;
-      ctx.font = "11px system-ui";
-      // ctx.fillText(node.state.text ?? "hello", x + pr, y + 40);
-      ctx.fillText(
-        node.state.text ?? "hello",
-        screenPos.x + pr,
-        screenPos.y + 20
-      );
-      ctx.restore();
+      const lx = x + pr; // 월드 x
+      const ly = y + 24 + 6; // 타이틀 바(24) 아래 여백 6
+      // renderer._drawScreenText(node.state.text ?? "hello", lx, ly, {
+      //   fontPx: 11,
+      //   color: theme.text,
+      //   baseline: "top",
+      //   align: "left",
+      // });
     },
   });
 
