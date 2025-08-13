@@ -1,3 +1,6 @@
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 class Registry {
   constructor() {
     this.types = /* @__PURE__ */ new Map();
@@ -5,6 +8,14 @@ class Registry {
   register(type, def) {
     if (this.types.has(type)) throw new Error(`Node type exists: ${type}`);
     this.types.set(type, def);
+  }
+  unregister(type) {
+    if (this.types.has(type)) throw new Error(`Node type exists: ${type}`);
+    this.types.delete(type);
+  }
+  removeAll() {
+    this.types.clear();
+    this.types = /* @__PURE__ */ new Map();
   }
   createInstance(type) {
     const def = this.types.get(type);
@@ -25,15 +36,40 @@ function createHooks(names) {
   };
 }
 function randomUUID() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
+  const g = typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : {};
+  const c = g.crypto || g.msCrypto;
+  if (c && typeof c.randomUUID === "function") {
+    return c.randomUUID();
+  }
+  if (c && typeof c.getRandomValues === "function") {
+    const bytes2 = new Uint8Array(16);
+    c.getRandomValues(bytes2);
+    bytes2[6] = bytes2[6] & 15 | 64;
+    bytes2[8] = bytes2[8] & 63 | 128;
+    const hex2 = Array.from(bytes2, (b) => b.toString(16).padStart(2, "0"));
+    return hex2.slice(0, 4).join("") + "-" + hex2.slice(4, 6).join("") + "-" + hex2.slice(6, 8).join("") + "-" + hex2.slice(8, 10).join("") + "-" + hex2.slice(10, 16).join("");
+  }
+  try {
+    const req = Function('return typeof require === "function" ? require : null')();
+    if (req) {
+      const nodeCrypto = req("crypto");
+      if (typeof nodeCrypto.randomUUID === "function") {
+        return nodeCrypto.randomUUID();
+      }
+      const bytes2 = nodeCrypto.randomBytes(16);
+      bytes2[6] = bytes2[6] & 15 | 64;
+      bytes2[8] = bytes2[8] & 63 | 128;
+      const hex2 = Array.from(bytes2, (b) => b.toString(16).padStart(2, "0"));
+      return hex2.slice(0, 4).join("") + "-" + hex2.slice(4, 6).join("") + "-" + hex2.slice(6, 8).join("") + "-" + hex2.slice(8, 10).join("") + "-" + hex2.slice(10, 16).join("");
+    }
+  } catch {
   }
   const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
+  for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
   bytes[6] = bytes[6] & 15 | 64;
   bytes[8] = bytes[8] & 63 | 128;
-  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0"));
-  return hex.slice(0, 4).join("") + "-" + hex.slice(4, 6).join("") + "-" + hex.slice(6, 8).join("") + "-" + hex.slice(8, 10).join("") + "-" + hex.slice(10).join("");
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+  return hex.slice(0, 4).join("") + "-" + hex.slice(4, 6).join("") + "-" + hex.slice(6, 8).join("") + "-" + hex.slice(8, 10).join("") + "-" + hex.slice(10, 16).join("");
 }
 class Node {
   constructor({ id, type, title, x = 0, y = 0, width = 160, height = 60 }) {
@@ -197,7 +233,7 @@ function portRect(node, port, idx, dir) {
   if (dir === "out")
     return { x: node.pos.x + node.size.width, y, w: pad, h: 14 };
 }
-class CanvasRenderer {
+const _CanvasRenderer = class _CanvasRenderer {
   constructor(canvas, { theme = {}, registry, edgeStyle = "orthogonal" } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -257,6 +293,26 @@ class CanvasRenderer {
     this.offsetY = cy - wy * next;
     this.scale = next;
   }
+  screenToWorld(x, y) {
+    return {
+      x: (x - this.offsetX) / this.scale,
+      y: (y - this.offsetY) / this.scale
+    };
+  }
+  worldToScreen(x, y) {
+    return {
+      x: x * this.scale + this.offsetX,
+      y: y * this.scale + this.offsetY
+    };
+  }
+  _applyTransform() {
+    const { ctx } = this;
+    ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
+  }
+  _resetTransform() {
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  // ── Drawing ────────────────────────────────────────────────────────────────
   _drawArrowhead(x1, y1, x2, y2, size = 10) {
     const { ctx } = this;
     const s = size / this.scale;
@@ -273,26 +329,6 @@ class CanvasRenderer {
     );
     ctx.closePath();
     ctx.fill();
-  }
-  screenToWorld(x, y) {
-    return {
-      x: (x - this.offsetX) / this.scale,
-      y: (y - this.offsetY) / this.scale
-    };
-  }
-  worldToScreen(x, y) {
-    return {
-      x: x * this.scale + this.offsetX,
-      y: y * this.scale + this.offsetY
-    };
-  }
-  // ── Drawing ────────────────────────────────────────────────────────────────
-  _applyTransform() {
-    const { ctx } = this;
-    ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
-  }
-  _resetTransform() {
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
   _drawScreenText(text, lx, ly, {
     fontPx = 12,
@@ -357,7 +393,7 @@ class CanvasRenderer {
     ctx.save();
     if (running) {
       const speed = 120;
-      const phase = time / 1e3 * speed / this.scale % 12;
+      const phase = time / 1e3 * speed / this.scale % _CanvasRenderer.FONT_SIZE;
       ctx.setLineDash([6 / this.scale, 6 / this.scale]);
       ctx.lineDashOffset = -phase;
     } else {
@@ -420,8 +456,8 @@ class CanvasRenderer {
     ctx.fillStyle = theme.title;
     roundRect(ctx, x, y, w, 24, { tl: r, tr: r, br: 0, bl: 0 });
     ctx.fill();
-    this._drawScreenText(node.title, x + 8, y + 12, {
-      fontPx: 12,
+    this._drawScreenText(node.title, x + 8, y + _CanvasRenderer.FONT_SIZE, {
+      fontPx: _CanvasRenderer.FONT_SIZE,
       color: theme.text,
       baseline: "middle",
       align: "left"
@@ -496,7 +532,9 @@ class CanvasRenderer {
     ctx.bezierCurveTo(x1 + dx, y1, x2 - dx, y2, x2, y2);
     ctx.stroke();
   }
-}
+};
+__publicField(_CanvasRenderer, "FONT_SIZE", 12);
+let CanvasRenderer = _CanvasRenderer;
 function roundRect(ctx, x, y, w, h, r = 6) {
   if (typeof r === "number") r = { tl: r, tr: r, br: r, bl: r };
   ctx.beginPath();
@@ -579,6 +617,18 @@ function RemoveNodeCmd(graph, node) {
     }
   };
 }
+function ResizeNodeCmd(node, fromSize, toSize) {
+  return {
+    do() {
+      node.size.width = toSize.w;
+      node.size.height = toSize.h;
+    },
+    undo() {
+      node.size.width = fromSize.w;
+      node.size.height = fromSize.h;
+    }
+  };
+}
 class CommandStack {
   constructor() {
     this.undoStack = [];
@@ -604,7 +654,7 @@ class CommandStack {
     }
   }
 }
-class Controller {
+const _Controller = class _Controller {
   constructor({ graph, renderer, hooks }) {
     this.graph = graph;
     this.renderer = renderer;
@@ -614,13 +664,22 @@ class Controller {
     this.dragging = null;
     this.connecting = null;
     this.panning = null;
+    this.resizing = null;
+    this._cursor = "default";
     this._onKeyPressEvt = this._onKeyPress.bind(this);
     this._onDownEvt = this._onDown.bind(this);
     this._onWheelEvt = this._onWheel.bind(this);
     this._onMoveEvt = this._onMove.bind(this);
     this._onUpEvt = this._onUp.bind(this);
-    this._cursor = "default";
     this._bindEvents();
+  }
+  destructor() {
+    const c = this.renderer.canvas;
+    c.removeEventListener("mousedown", this._onDownEvt);
+    c.removeEventListener("wheel", this._onWheelEvt, { passive: false });
+    window.removeEventListener("mousemove", this._onMoveEvt);
+    window.removeEventListener("mouseup", this._onUpEvt);
+    window.removeEventListener("keydown", this._onKeyPressEvt);
   }
   _bindEvents() {
     const c = this.renderer.canvas;
@@ -705,6 +764,19 @@ class Controller {
     }
     return null;
   }
+  _resizeHandleRect(node) {
+    const s = 10;
+    return {
+      x: node.pos.x + node.size.width - s,
+      y: node.pos.y + node.size.height - s,
+      w: s,
+      h: s
+    };
+  }
+  _hitResizeHandle(node, wx, wy) {
+    const r = this._resizeHandleRect(node);
+    return wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h;
+  }
   _onDown(e) {
     const s = this._posScreen(e);
     const w = this._posWorld(e);
@@ -747,6 +819,20 @@ class Controller {
       }
     }
     const node = this._findNodeAtWorld(w.x, w.y);
+    if (e.button === 0 && node && this._hitResizeHandle(node, w.x, w.y)) {
+      this.resizing = {
+        nodeId: node.id,
+        startW: node.size.width,
+        startH: node.size.height,
+        startX: w.x,
+        startY: w.y
+      };
+      if (!e.shiftKey) this.selection.clear();
+      this.selection.add(node.id);
+      this._setCursor("se-resize");
+      this.render();
+      return;
+    }
     if (e.button === 0 && node) {
       if (!e.shiftKey) this.selection.clear();
       this.selection.add(node.id);
@@ -768,9 +854,22 @@ class Controller {
     }
   }
   _onMove(e) {
-    var _a;
+    var _a, _b;
     const s = this._posScreen(e);
     const w = this.renderer.screenToWorld(s.x, s.y);
+    if (this.resizing) {
+      const n = this.graph.nodes.get(this.resizing.nodeId);
+      const dx = w.x - this.resizing.startX;
+      const dy = w.y - this.resizing.startY;
+      const minW = _Controller.MIN_NODE_WIDTH;
+      const minH = _Controller.MIN_NODE_HEIGHT;
+      n.size.width = Math.max(minW, this.resizing.startW + dx);
+      n.size.height = Math.max(minH, this.resizing.startH + dy);
+      (_a = this.hooks) == null ? void 0 : _a.emit("node:resize", n);
+      this._setCursor("se-resize");
+      this.render();
+      return;
+    }
     if (this.panning) {
       const dx = s.x - this.panning.x;
       const dy = s.y - this.panning.y;
@@ -783,7 +882,7 @@ class Controller {
       const n = this.graph.nodes.get(this.dragging.nodeId);
       n.pos.x = w.x - this.dragging.dx;
       n.pos.y = w.y - this.dragging.dy;
-      (_a = this.hooks) == null ? void 0 : _a.emit("node:move", n);
+      (_b = this.hooks) == null ? void 0 : _b.emit("node:move", n);
       this.render();
       return;
     }
@@ -797,6 +896,11 @@ class Controller {
       this._setCursor("grabbing");
     } else {
       this._setCursor("default");
+    }
+    const node = this._findNodeAtWorld(w.x, w.y);
+    if (node && this._hitResizeHandle(node, w.x, w.y)) {
+      this._setCursor("se-resize");
+      this.render();
     }
   }
   _onUp(e) {
@@ -823,6 +927,16 @@ class Controller {
       this.connecting = null;
       this.render();
     }
+    if (this.resizing) {
+      const n = this.graph.nodes.get(this.resizing.nodeId);
+      const from = { w: this.resizing.startW, h: this.resizing.startH };
+      const to = { w: n.size.width, h: n.size.height };
+      if (from.w !== to.w || from.h !== to.h) {
+        this.stack.exec(ResizeNodeCmd(n, from, to));
+      }
+      this.resizing = null;
+      this._setCursor("default");
+    }
     if (this.dragging) {
       const n = this.graph.nodes.get(this.dragging.nodeId);
       const start = this.dragging.startPos;
@@ -835,19 +949,25 @@ class Controller {
     this.dragging = null;
   }
   render() {
-    const tEdge = this.connecting ? (() => {
-      const a = this._portAnchorScreen(
-        this.connecting.fromNode,
-        this.connecting.fromPort
-      );
-      const b = { x: this.connecting.x, y: this.connecting.y };
-      return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
-    })() : null;
+    const tEdge = this.renderTempEdge();
     this.renderer.draw(this.graph, {
       selection: this.selection,
       tempEdge: tEdge
       // 그대로 전달
     });
+  }
+  renderTempEdge() {
+    if (!this.connecting) return null;
+    const a = this._portAnchorScreen(
+      this.connecting.fromNode,
+      this.connecting.fromPort
+    );
+    return {
+      x1: a.x,
+      y1: a.y,
+      x2: this.connecting.x,
+      y2: this.connecting.y
+    };
   }
   _portAnchorScreen(nodeId, portId) {
     const n = this.graph.nodes.get(nodeId);
@@ -855,7 +975,10 @@ class Controller {
     const r = portRect(n, null, iOut, "out");
     return this.renderer.worldToScreen(r.x, r.y + 7);
   }
-}
+};
+__publicField(_Controller, "MIN_NODE_WIDTH", 80);
+__publicField(_Controller, "MIN_NODE_HEIGHT", 60);
+let Controller = _Controller;
 function rectHas(r, x, y) {
   return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 }
@@ -940,6 +1063,7 @@ class Runner {
 }
 function createGraphEditor(canvas, { theme, hooks: customHooks, autorun = true } = {}) {
   const hooks = customHooks ?? createHooks([
+    // essential hooks
     "node:create",
     "node:move",
     "edge:create",
@@ -948,7 +1072,8 @@ function createGraphEditor(canvas, { theme, hooks: customHooks, autorun = true }
     "error",
     "runner:tick",
     "runner:start",
-    "runner:stop"
+    "runner:stop",
+    "node:resize"
   ]);
   const registry = new Registry();
   const graph = new Graph({ hooks, registry });

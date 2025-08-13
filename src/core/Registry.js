@@ -8,6 +8,14 @@ export class Registry {
     if (this.types.has(type)) throw new Error(`Node type exists: ${type}`);
     this.types.set(type, def);
   }
+  unregister(type) {
+    if (this.types.has(type)) throw new Error(`Node type exists: ${type}`);
+    this.types.delete(type);
+  }
+  removeAll() {
+    this.types.clear();
+    this.types = new Map();
+  }
   createInstance(type) {
     const def = this.types.get(type);
     if (!def) throw new Error(`Unknown node type: ${type}`);

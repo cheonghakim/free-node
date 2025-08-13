@@ -12,6 +12,7 @@ export function createGraphEditor(
   const hooks =
     customHooks ??
     createHooks([
+      // essential hooks
       "node:create",
       "node:move",
       "edge:create",
@@ -21,6 +22,7 @@ export function createGraphEditor(
       "runner:tick",
       "runner:start",
       "runner:stop",
+      "node:resize",
     ]);
   const registry = new Registry();
   const graph = new Graph({ hooks, registry });

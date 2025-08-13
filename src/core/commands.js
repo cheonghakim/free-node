@@ -100,3 +100,16 @@ export function RemoveNodeCmd(graph, node) {
     },
   };
 }
+
+export function ResizeNodeCmd(node, fromSize, toSize) {
+  return {
+    do() {
+      node.size.width = toSize.w;
+      node.size.height = toSize.h;
+    },
+    undo() {
+      node.size.width = fromSize.w;
+      node.size.height = fromSize.h;
+    },
+  };
+}

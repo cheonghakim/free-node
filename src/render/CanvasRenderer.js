@@ -1,6 +1,7 @@
 import { hitTestNode, portRect } from "./hitTest.js";
 
 export class CanvasRenderer {
+  static FONT_SIZE = 12;
   constructor(canvas, { theme = {}, registry, edgeStyle = "orthogonal" } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -68,6 +69,28 @@ export class CanvasRenderer {
     this.offsetY = cy - wy * next;
     this.scale = next;
   }
+
+  screenToWorld(x, y) {
+    return {
+      x: (x - this.offsetX) / this.scale,
+      y: (y - this.offsetY) / this.scale,
+    };
+  }
+  worldToScreen(x, y) {
+    return {
+      x: x * this.scale + this.offsetX,
+      y: y * this.scale + this.offsetY,
+    };
+  }
+  _applyTransform() {
+    const { ctx } = this;
+    ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
+  }
+  _resetTransform() {
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  // ── Drawing ────────────────────────────────────────────────────────────────
   _drawArrowhead(x1, y1, x2, y2, size = 10) {
     const { ctx } = this;
     const s = size / this.scale; // 줌에 따라 크기 보정
@@ -85,28 +108,6 @@ export class CanvasRenderer {
     );
     ctx.closePath();
     ctx.fill(); // 선 색상과 동일한 fill이 자연스러움
-  }
-
-  screenToWorld(x, y) {
-    return {
-      x: (x - this.offsetX) / this.scale,
-      y: (y - this.offsetY) / this.scale,
-    };
-  }
-  worldToScreen(x, y) {
-    return {
-      x: x * this.scale + this.offsetX,
-      y: y * this.scale + this.offsetY,
-    };
-  }
-
-  // ── Drawing ────────────────────────────────────────────────────────────────
-  _applyTransform() {
-    const { ctx } = this;
-    ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
-  }
-  _resetTransform() {
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   _drawScreenText(
@@ -196,7 +197,8 @@ export class CanvasRenderer {
     ctx.save();
     if (running) {
       const speed = 120; // px/s
-      const phase = (((time / 1000) * speed) / this.scale) % 12;
+      const phase =
+        (((time / 1000) * speed) / this.scale) % CanvasRenderer.FONT_SIZE;
       ctx.setLineDash([6 / this.scale, 6 / this.scale]);
       ctx.lineDashOffset = -phase;
     } else {
@@ -275,8 +277,8 @@ export class CanvasRenderer {
     roundRect(ctx, x, y, w, 24, { tl: r, tr: r, br: 0, bl: 0 });
     ctx.fill();
 
-    this._drawScreenText(node.title, x + 8, y + 12, {
-      fontPx: 12,
+    this._drawScreenText(node.title, x + 8, y + CanvasRenderer.FONT_SIZE, {
+      fontPx: CanvasRenderer.FONT_SIZE,
       color: theme.text,
       baseline: "middle",
       align: "left",
