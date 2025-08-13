@@ -1,10 +1,20 @@
 import { hitTestNode, portRect } from "../render/hitTest.js";
+import {
+  MoveNodeCmd,
+  AddEdgeCmd,
+  RemoveEdgeCmd,
+  CompoundCmd,
+  RemoveNodeCmd,
+} from "../core/commands.js";
+import { CommandStack } from "../core/CommandStack.js";
 
 export class Controller {
   constructor({ graph, renderer, hooks }) {
     this.graph = graph;
     this.renderer = renderer;
     this.hooks = hooks;
+
+    this.stack = new CommandStack();
 
     this.selection = new Set();
     this.dragging = null; // { nodeId, dx, dy }
@@ -32,9 +42,28 @@ export class Controller {
   }
 
   _onKeyPress(e) {
+    // Undo: Ctrl/Cmd + Z  (Shift+Z → Redo)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) this.stack.redo();
+      else this.stack.undo();
+      this.render();
+      return;
+    }
+
+    // Redo: Ctrl/Cmd + Y
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      this.stack.redo();
+      this.render();
+      return;
+    }
+
     // remove the selected nodes
     if (e.key === "Delete") {
       [...this.selection].forEach((node) => {
+        const nodeObj = this.graph.getNodeById(node);
+        this.stack.exec(RemoveNodeCmd(this.graph, nodeObj));
         this.graph.removeNode(node);
       });
 
@@ -128,27 +157,23 @@ export class Controller {
     if (e.button === 0 && port && port.dir === "in") {
       const incoming = this._findIncomingEdge(port.node.id, port.port.id);
       if (incoming) {
-        // 원래 소스 쪽에서 다시 끌어오도록, 엣지를 임시 삭제
         const { edge, id } = incoming;
-        this.graph.edges.delete(id);
-        const outR = portRect(
-          this.graph.nodes.get(edge.fromNode),
-          this.graph.nodes
-            .get(edge.fromNode)
-            .outputs.find((p) => p.id === edge.fromPort),
-          this.graph.nodes
-            .get(edge.fromNode)
-            .outputs.findIndex((p) => p.id === edge.fromPort),
-          "out"
-        );
+
+        // remove as command (즉시 실행 → 미리보기에서도 사라짐)
+        const rm = RemoveEdgeCmd(this.graph, id);
+        if (rm) this.stack.exec(rm);
+
+        const outNode = this.graph.nodes.get(edge.fromNode);
+        const iOut = outNode.outputs.findIndex((p) => p.id === edge.fromPort);
+        const outR = portRect(outNode, outNode.outputs[iOut], iOut, "out");
         const screenFrom = this.renderer.worldToScreen(outR.x, outR.y + 7);
+
         this.connecting = {
           fromNode: edge.fromNode,
           fromPort: edge.fromPort,
           x: screenFrom.x,
           y: screenFrom.y,
-          // 표시용: 끊어낸 대상 인풋
-          _rewireFromEdgeId: id,
+          _removedEdge: { id, edge }, // 참고용 메모 (이미 제거됨)
         };
         this.render();
         return;
@@ -165,6 +190,7 @@ export class Controller {
         nodeId: node.id,
         dx: w.x - node.pos.x,
         dy: w.y - node.pos.y,
+        startPos: { x: node.pos.x, y: node.pos.y }, // 원위치 저장
       };
       this.render();
       return;
@@ -231,15 +257,32 @@ export class Controller {
       const from = this.connecting;
       const portIn = this._findPortAtWorld(w.x, w.y);
       if (portIn && portIn.dir === "in") {
-        this.graph.addEdge(
-          from.fromNode,
-          from.fromPort,
-          portIn.node.id,
-          portIn.port.id
+        // AddEdge as command
+        this.stack.exec(
+          AddEdgeCmd(
+            this.graph,
+            from.fromNode,
+            from.fromPort,
+            portIn.node.id,
+            portIn.port.id
+          )
         );
       }
+      // else: 빈 곳에 놓으면 이미 RemoveEdgeCmd 실행된 상태 → "해제" 완료
+
       this.connecting = null;
       this.render();
+    }
+
+    if (this.dragging) {
+      const n = this.graph.nodes.get(this.dragging.nodeId);
+      const start = this.dragging.startPos;
+      const end = { x: n.pos.x, y: n.pos.y };
+      // 위치가 바뀐 경우만 커밋
+      if (start.x !== end.x || start.y !== end.y) {
+        this.stack.exec(MoveNodeCmd(n, start, end));
+      }
+      this.dragging = null;
     }
 
     this.dragging = null;

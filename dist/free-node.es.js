@@ -106,6 +106,13 @@ class Graph {
     (_a = this.hooks) == null ? void 0 : _a.emit("edge:create", e);
     return e;
   }
+  clear() {
+    var _a, _b;
+    (_a = this.nodes) == null ? void 0 : _a.clear();
+    (_b = this.edges) == null ? void 0 : _b.clear();
+    this.nodes = /* @__PURE__ */ new Map();
+    this.edges = /* @__PURE__ */ new Map();
+  }
   // buffer helpers
   _curBuf() {
     return this._useAasCurrent ? this._valuesA : this._valuesB;
@@ -313,6 +320,7 @@ class CanvasRenderer {
     console.log(tempEdge);
     const { ctx, theme } = this;
     this._applyTransform();
+    ctx.save();
     ctx.strokeStyle = theme.edge;
     ctx.lineWidth = 2 / this.scale;
     for (const e of graph.edges.values()) this._drawEdge(graph, e);
@@ -352,6 +360,7 @@ class CanvasRenderer {
       const def = (_b = (_a = this.registry) == null ? void 0 : _a.types) == null ? void 0 : _b.get(n.type);
       if (def == null ? void 0 : def.onDraw) def.onDraw(n, { ctx, theme });
     }
+    ctx.restore();
     this._resetTransform();
   }
   _drawNode(node, selected) {
@@ -465,15 +474,29 @@ class Controller {
     this.dragging = null;
     this.connecting = null;
     this.panning = null;
+    this._onKeyPressEvt = this._onKeyPress.bind(this);
+    this._onDownEvt = this._onDown.bind(this);
+    this._onWheelEvt = this._onWheel.bind(this);
+    this._onMoveEvt = this._onMove.bind(this);
+    this._onUpEvt = this._onUp.bind(this);
     this._cursor = "default";
     this._bindEvents();
   }
   _bindEvents() {
     const c = this.renderer.canvas;
-    c.addEventListener("mousedown", (e) => this._onDown(e));
-    window.addEventListener("mousemove", (e) => this._onMove(e));
-    window.addEventListener("mouseup", (e) => this._onUp(e));
-    c.addEventListener("wheel", (e) => this._onWheel(e), { passive: false });
+    c.addEventListener("mousedown", this._onDownEvt);
+    c.addEventListener("wheel", this._onWheelEvt, { passive: false });
+    window.addEventListener("mousemove", this._onMoveEvt);
+    window.addEventListener("mouseup", this._onUpEvt);
+    window.addEventListener("keydown", this._onKeyPressEvt);
+  }
+  _onKeyPress(e) {
+    if (e.key === "Delete") {
+      [...this.selection].forEach((node) => {
+        this.graph.removeNode(node);
+      });
+      this.render();
+    }
   }
   _setCursor(c) {
     if (this._cursor !== c) {

@@ -18,12 +18,45 @@ export function createGraphEditor(
       "edge:delete",
       "graph:serialize",
       "error",
+      "runner:tick",
+      "runner:start",
+      "runner:stop",
     ]);
   const registry = new Registry();
   const graph = new Graph({ hooks, registry });
   const renderer = new CanvasRenderer(canvas, { theme, registry });
   const controller = new Controller({ graph, renderer, hooks });
   const runner = new Runner({ graph, registry, hooks });
+
+  hooks.on("runner:tick", ({ time, dt }) => {
+    renderer.draw(graph, {
+      selection: controller.selection,
+      tempEdge: controller.connecting ? controller.renderTempEdge() : null, // 필요시 helper
+      running: true,
+      time,
+      dt,
+    });
+  });
+  hooks.on("runner:start", () => {
+    // 첫 프레임 즉시 렌더
+    renderer.draw(graph, {
+      selection: controller.selection,
+      tempEdge: controller.connecting ? controller.renderTempEdge() : null,
+      running: true,
+      time: performance.now(),
+      dt: 0,
+    });
+  });
+  hooks.on("runner:stop", () => {
+    // 정지 프레임
+    renderer.draw(graph, {
+      selection: controller.selection,
+      tempEdge: controller.connecting ? controller.renderTempEdge() : null,
+      running: false,
+      time: performance.now(),
+      dt: 0,
+    });
+  });
 
   // default node
   registry.register("core/Note", {
@@ -47,9 +80,19 @@ export function createGraphEditor(
       const pr = 8;
       const { x, y } = node.pos;
       const { width: w } = node.size;
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const screenPos = renderer.worldToScreen(x + pr, y + 20);
       ctx.fillStyle = theme.text;
       ctx.font = "11px system-ui";
-      ctx.fillText(node.state.text ?? "hello", x + pr, y + 40);
+      // ctx.fillText(node.state.text ?? "hello", x + pr, y + 40);
+      ctx.fillText(
+        node.state.text ?? "hello",
+        screenPos.x + pr,
+        screenPos.y + 20
+      );
+      ctx.restore();
     },
   });
 

@@ -148,11 +148,30 @@ export class CanvasRenderer {
     this._resetTransform();
   }
 
-  draw(graph, { selection = new Set(), tempEdge = null } = {}) {
+  draw(
+    graph,
+    {
+      selection = new Set(),
+      tempEdge = null,
+      running = false,
+      time = performance.now(),
+      dt = 0,
+    } = {}
+  ) {
     this.drawGrid();
-    console.log(tempEdge);
     const { ctx, theme } = this;
     this._applyTransform();
+
+    ctx.save();
+    if (running) {
+      const speed = 120; // px/s
+      const phase = (((time / 1000) * speed) / this.scale) % 12;
+      ctx.setLineDash([6 / this.scale, 6 / this.scale]);
+      ctx.lineDashOffset = -phase;
+    } else {
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
 
     // edges
     ctx.strokeStyle = theme.edge;
@@ -188,7 +207,7 @@ export class CanvasRenderer {
 
       this.ctx.setLineDash(prevDash);
 
-      // (선택) 화살표 표시: 마지막 세그먼트 방향 사용
+      // 화살표 표시: 마지막 세그먼트 방향 사용
       if (ptsForArrow && ptsForArrow.length >= 2) {
         const p1 = ptsForArrow[ptsForArrow.length - 2];
         const p2 = ptsForArrow[ptsForArrow.length - 1];
@@ -197,6 +216,7 @@ export class CanvasRenderer {
         this._drawArrowhead(p1.x, p1.y, p2.x, p2.y, 12);
       }
     }
+    ctx.restore();
 
     // nodes
     for (const n of graph.nodes.values()) {

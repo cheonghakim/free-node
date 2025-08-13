@@ -8,6 +8,17 @@ export class Runner {
     this._last = 0;
     this.cyclesPerFrame = Math.max(1, cyclesPerFrame | 0);
   }
+
+  // 외부에서 실행 중인지 확인
+  isRunning() {
+    return this.running;
+  }
+
+  // 실행 도중에도 CPS 변경 가능
+  setCyclesPerFrame(n) {
+    this.cyclesPerFrame = Math.max(1, n | 0);
+  }
+
   step(cycles = 1, dt = 0) {
     const nCycles = Math.max(1, cycles | 0);
     for (let c = 0; c < nCycles; c++) {
@@ -32,7 +43,7 @@ export class Runner {
               },
             });
           } catch (err) {
-            this.hooks?.emit("error", err);
+            this.hooks?.emit?.("error", err);
           }
         }
       }
@@ -40,22 +51,42 @@ export class Runner {
       this.graph.swapBuffers();
     }
   }
+
   start() {
     if (this.running) return;
     this.running = true;
-    const step = (t) => {
+    this._last = 0;
+    this.hooks?.emit?.("runner:start");
+
+    const loop = (t) => {
       if (!this.running) return;
-      const dt = this._last ? (t - this._last) / 1000 : 0; // seconds
+      const dtMs = this._last ? t - this._last : 0;
       this._last = t;
+      const dt = dtMs / 1000; // seconds
+
+      // 1) 스텝 실행
       this.step(this.cyclesPerFrame, dt);
-      this._raf = requestAnimationFrame(step);
+
+      // 2) 프레임 훅 (렌더러/컨트롤러는 여기서 running, time, dt를 받아 표현 업데이트)
+      this.hooks?.emit?.("runner:tick", {
+        time: t,
+        dt,
+        running: true,
+        cps: this.cyclesPerFrame,
+      });
+
+      this._raf = requestAnimationFrame(loop);
     };
-    this._raf = requestAnimationFrame(step);
+
+    this._raf = requestAnimationFrame(loop);
   }
+
   stop() {
+    if (!this.running) return;
     this.running = false;
     if (this._raf) cancelAnimationFrame(this._raf);
     this._raf = null;
     this._last = 0;
+    this.hooks?.emit?.("runner:stop");
   }
 }

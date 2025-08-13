@@ -12,6 +12,15 @@ export class Graph {
     this._valuesB = new Map(); // next
     this._useAasCurrent = true;
   }
+  getNodeById(id) {
+    for (let [_id, node] of this.nodes.entries()) {
+      if (id === _id) {
+        return node;
+      }
+    }
+
+    return null;
+  }
   addNode(type, opts = {}) {
     const def = this.registry.types.get(type);
     if (!def) throw new Error(`Unknown node type: ${type}`);
